@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VeloTrack — Object Speed Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#080a0f; --surface:#0d1117; --surface2:#111820; --border:#1e2a3a;
+    --accent:#00e5ff; --accent2:#ff3d71; --accent3:#a259ff;
+    --green:#00ff94; --yellow:#ffd60a; --text:#e8edf5; --muted:#4a5568;
+    --glow:0 0 20px rgba(0,229,255,.3); --glow2:0 0 20px rgba(255,61,113,.3);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden;overscroll-behavior:none}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+  .wrapper{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:14px 14px}
+
+  /* ── Header ── */
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px}
+  .logo-main{font-family:'Bebas Neue',sans-serif;font-size:clamp(1.7rem,5vw,2.5rem);letter-spacing:3px;background:linear-gradient(135deg,var(--accent),var(--accent3));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+  .logo-sub{font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);letter-spacing:3px;text-transform:uppercase}
+  .status-pill{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:.62rem;letter-spacing:2px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:6px 12px;border-radius:100px;text-transform:uppercase;white-space:nowrap}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:all .3s}
+  .status-dot.active{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.5s infinite}
+  .status-dot.camera{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .status-dot.error{background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+  /* ── HTTPS Warning ── */
+  #httpsWarning{display:none;background:rgba(255,214,10,.08);border:1px solid var(--yellow);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-family:'DM Mono',monospace;font-size:.6rem;color:var(--yellow);letter-spacing:1px;line-height:1.7}
+  #httpsWarning.show{display:block}
+
+  /* ── Grid ── */
+  .main-grid{display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start}
+  @media(max-width:860px){.main-grid{grid-template-columns:1fr}}
+
+  /* ── Video ── */
+  .video-section{display:flex;flex-direction:column;gap:10px}
+
+  /* FIX: padding-top ratio trick — reliable on all browsers/iOS */
+  .video-container{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;width:100%;padding-top:56.25%}
+  .video-inner{position:absolute;inset:0}
+
+  .corner{position:absolute;width:18px;height:18px;z-index:20;pointer-events:none}
+  .corner-tl{top:8px;left:8px;border-top:2px solid var(--accent);border-left:2px solid var(--accent)}
+  .corner-tr{top:8px;right:8px;border-top:2px solid var(--accent);border-right:2px solid var(--accent)}
+  .corner-bl{bottom:8px;left:8px;border-bottom:2px solid var(--accent);border-left:2px solid var(--accent)}
+  .corner-br{bottom:8px;right:8px;border-bottom:2px solid var(--accent);border-right:2px solid var(--accent)}
+
+  /* FIX: video is CSS-mirrored for natural selfie look.
+     Canvas is NOT mirrored — JS applies transform to match. */
+  #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1)}
+  #canvas{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none;z-index:5}
+
+  .video-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--surface)}
+  .placeholder-icon{width:56px;height:56px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted)}
+  .placeholder-text{font-family:'DM Mono',monospace;font-size:.68rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;text-align:center;padding:0 20px;line-height:1.8}
+
+  /* Error overlay inside video */
+  #camError{display:none;position:absolute;bottom:10px;left:10px;right:10px;background:rgba(255,61,113,.13);border:1px solid var(--accent2);border-radius:8px;padding:10px 12px;font-family:'DM Mono',monospace;font-size:.6rem;color:var(--accent2);letter-spacing:.5px;z-index:30;line-height:1.7;white-space:pre-line}
+  #camError.show{display:block}
+
+  /* Speed overlay on video */
+  .speed-overlay{position:absolute;top:10px;left:10px;background:rgba(8,10,15,.88);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:20;min-width:100px;display:none}
+  .speed-overlay.visible{display:block}
+  .overlay-label{font-family:'DM Mono',monospace;font-size:.52rem;letter-spacing:3px;color:var(--accent);text-transform:uppercase;margin-bottom:2px}
+  .overlay-value{font-family:'Bebas Neue',sans-serif;font-size:clamp(1.5rem,4vw,2.1rem);letter-spacing:2px;line-height:1;color:var(--text)}
+  .overlay-unit{font-family:'DM Mono',monospace;font-size:.55rem;color:var(--muted);letter-spacing:2px}
+
+  .fps-badge{position:absolute;top:10px;right:10px;background:rgba(8,10,15,.8);border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:2px;color:var(--muted);z-index:20;display:none}
+  .fps-badge.visible{display:block}
+
+  /* Scan line */
+  .scanning .video-inner::after{content:'';position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);top:0;animation:scanline 3s linear infinite;opacity:.45;pointer-events:none;z-index:15}
+  @keyframes scanline{0%{top:0}100%{top:100%}}
+
+  /* ── Controls ── */
+  .controls-bar{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  @media(min-width:480px){.controls-bar{grid-template-columns:repeat(4,1fr)}}
+
+  .btn{font-family:'DM Mono',monospace;font-size:.62rem;letter-spacing:1.5px;text-transform:uppercase;border:none;cursor:pointer;padding:12px 6px;border-radius:8px;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;min-height:46px;touch-action:manipulation;-webkit-user-select:none;user-select:none;white-space:nowrap}
+  .btn-primary{background:var(--accent);color:var(--bg);font-weight:500}
+  .btn-primary:hover:not(:disabled){background:#33ecff;box-shadow:var(--glow)}
+  .btn-primary:active:not(:disabled){transform:scale(.97)}
+  .btn-danger{background:transparent;color:var(--accent2);border:1px solid var(--accent2)}
+  .btn-danger:hover:not(:disabled){background:rgba(255,61,113,.1);box-shadow:var(--glow2)}
+  .btn-danger:active:not(:disabled){transform:scale(.97)}
+  .btn-secondary{background:transparent;color:var(--accent3);border:1px solid var(--accent3)}
+  .btn-secondary:hover:not(:disabled){background:rgba(162,89,255,.1)}
+  .btn-secondary:active:not(:disabled){transform:scale(.97)}
+  .btn:disabled{opacity:.3;cursor:not-allowed;transform:none!important}
+
+  /* ── Side Panel ── */
+  .side-panel{display:flex;flex-direction:column;gap:12px}
+  .panel-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px}
+  .panel-title{font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:4px;color:var(--accent);text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .panel-title::after{content:'';flex:1;height:1px;background:var(--border)}
+
+  .speed-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .speed-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;position:relative;overflow:hidden;transition:border-color .3s}
+  .speed-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--accent);transform:scaleX(0);transition:transform .3s}
+  .speed-card.active::after{transform:scaleX(1)}
+  .speed-card.active{border-color:rgba(0,229,255,.25)}
+  .speed-card-label{font-family:'DM Mono',monospace;font-size:.5rem;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:4px}
+  .speed-card-value{font-family:'Bebas Neue',sans-serif;font-size:clamp(1.5rem,4vw,2rem);letter-spacing:1px;line-height:1;color:var(--text);transition:color .2s}
+  .speed-card-value.high{color:var(--accent2)}
+  .speed-card-value.med{color:var(--yellow)}
+  .speed-card-value.low{color:var(--green)}
+  .speed-card-unit{font-family:'DM Mono',monospace;font-size:.48rem;color:var(--muted);margin-top:3px}
+
+  #speedGraph{width:100%;height:70px;display:block;border-radius:6px;background:var(--surface2);margin-top:10px}
+
+  .cal-label{font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:2px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:7px}
+  /* FIX: font-size >= 16px prevents iOS auto-zoom on input focus */
+  .cal-input{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:16px;padding:9px 12px;border-radius:7px;outline:none;transition:border-color .2s;-webkit-appearance:none}
+  .cal-input:focus{border-color:var(--accent)}
+  .cal-hint{font-family:'DM Mono',monospace;font-size:.55rem;color:var(--muted);line-height:1.65;margin-top:7px}
+  .cal-group{margin-bottom:12px}
+
+  .mode-toggle{display:flex;gap:6px}
+  .mode-btn{flex:1;font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:1.5px;text-transform:uppercase;padding:9px 4px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .2s;text-align:center;min-height:38px;touch-action:manipulation}
+  .mode-btn.active{background:rgba(0,229,255,.1);border-color:var(--accent);color:var(--accent)}
+
+  .stats-list{display:flex;flex-direction:column}
+  .stat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)}
+  .stat-row:last-child{border-bottom:none}
+  .stat-key{font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+  .stat-val{font-family:'DM Mono',monospace;font-size:.68rem;color:var(--text);font-weight:500}
+  .stat-val.accent{color:var(--accent)}
+  .stat-val.green{color:var(--green)}
+  .stat-val.red{color:var(--accent2)}
+  .stat-val.warn{color:var(--yellow)}
+
+  .log-area{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;height:85px;overflow-y:auto;font-family:'DM Mono',monospace;font-size:.56rem;color:var(--muted);line-height:1.75}
+  .log-entry{color:var(--muted)}
+  .log-entry.info{color:var(--accent)}
+  .log-entry.success{color:var(--green)}
+  .log-entry.error{color:var(--accent2)}
+  .log-entry.warn{color:var(--yellow)}
+
+  footer{margin-top:14px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  .footer-text{font-family:'DM Mono',monospace;font-size:.54rem;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <div id="httpsWarning">
+    ⚠ HTTPS required for camera on mobile.<br>
+    Serve this page over https:// or use localhost. On Chrome Android: Settings → Site Settings → Camera → allow this site.
+  </div>
+
+  <header>
+    <div>
+      <div class="logo-main">VeloTrack</div>
+      <div class="logo-sub">Object Speed Tracker</div>
+    </div>
+    <div class="status-pill">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Standby</span>
+    </div>
+  </header>
+
+  <div class="main-grid">
+    <div class="video-section">
+
+      <div class="video-container" id="videoContainer">
+        <div class="video-inner" id="videoInner">
+          <div class="corner corner-tl"></div>
+          <div class="corner corner-tr"></div>
+          <div class="corner corner-bl"></div>
+          <div class="corner corner-br"></div>
+
+          <div class="video-placeholder" id="placeholder">
+            <div class="placeholder-icon">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+              </svg>
+            </div>
+            <div class="placeholder-text" id="placeholderText">Tap "Camera"<br>to begin</div>
+          </div>
+
+          <!-- FIX: video is CSS-mirrored for natural front-camera view -->
+          <video id="video" autoplay muted playsinline webkit-playsinline></video>
+          <!-- FIX: canvas NOT CSS-mirrored — JS ctx.scale(-1,1) matches video -->
+          <canvas id="canvas"></canvas>
+
+          <div class="speed-overlay" id="speedOverlay">
+            <div class="overlay-label">Speed</div>
+            <div class="overlay-value" id="overlaySpeed">0.0</div>
+            <div class="overlay-unit" id="overlayUnit">km/h</div>
+          </div>
+
+          <div class="fps-badge" id="fpsBadge">— FPS</div>
+        </div>
+        <div id="camError"></div>
+      </div>
+
+      <div class="controls-bar">
+        <button class="btn btn-primary"   id="btnCamera" onclick="startCamera()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path fill-rule="evenodd" d="M1.5 4.875C1.5 3.839 2.34 3 3.375 3h17.25c1.035 0 1.875.84 1.875 1.875v14.25c0 1.036-.84 1.875-1.875 1.875H3.375A1.875 1.875 0 011.5 19.125V4.875z" clip-rule="evenodd"/></svg>
+          Camera
+        </button>
+        <button class="btn btn-primary"   id="btnTrack"  onclick="startTracking()" disabled>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
+          Track
+        </button>
+        <button class="btn btn-danger"    id="btnStop"   onclick="stopTracking()" disabled>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          Stop
+        </button>
+        <button class="btn btn-secondary" id="btnCal"    onclick="runCalibration()" disabled>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h6m-6 12h6M15 6h6M15 18h6"/></svg>
+          Calibrate
+        </button>
+      </div>
+    </div>
+
+    <div class="side-panel">
+      <div class="panel-card">
+        <div class="panel-title">Live Speed</div>
+        <div class="speed-cards">
+          <div class="speed-card" id="cardKmh">
+            <div class="speed-card-label">km/h</div>
+            <div class="speed-card-value" id="speedKmh">0.0</div>
+            <div class="speed-card-unit">km/h</div>
+          </div>
+          <div class="speed-card" id="cardMs">
+            <div class="speed-card-label">m/s</div>
+            <div class="speed-card-value" id="speedMs">0.00</div>
+            <div class="speed-card-unit">m/s</div>
+          </div>
+        </div>
+        <canvas id="speedGraph"></canvas>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-title">Calibration</div>
+        <div class="cal-group">
+          <label class="cal-label" for="calInput">Pixels per Meter</label>
+          <input class="cal-input" id="calInput" type="number" value="100" min="10" max="5000" inputmode="decimal">
+          <div class="cal-hint">Place a 1 m reference in view → measure its pixel width → enter above.</div>
+        </div>
+        <div class="cal-group" style="margin-bottom:0">
+          <label class="cal-label">Display Unit</label>
+          <div class="mode-toggle">
+            <div class="mode-btn active" id="unitKmh" onclick="setUnit('kmh')">km/h</div>
+            <div class="mode-btn"        id="unitMs"  onclick="setUnit('ms')">m/s</div>
+            <div class="mode-btn"        id="unitMph" onclick="setUnit('mph')">mph</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-title">Session Stats</div>
+        <div class="stats-list">
+          <div class="stat-row"><span class="stat-key">Max Speed</span> <span class="stat-val accent" id="maxSpeed">—</span></div>
+          <div class="stat-row"><span class="stat-key">Avg Speed</span> <span class="stat-val"        id="avgSpeed">—</span></div>
+          <div class="stat-row"><span class="stat-key">Frames</span>   <span class="stat-val"        id="frameCount">0</span></div>
+          <div class="stat-row"><span class="stat-key">Object</span>   <span class="stat-val red"    id="objDetected">—</span></div>
+          <div class="stat-row"><span class="stat-key">Camera</span>   <span class="stat-val"        id="cameraMode">—</span></div>
+          <div class="stat-row"><span class="stat-key">Backend</span>  <span class="stat-val"        id="backendStatus">—</span></div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-title">Event Log</div>
+        <div class="log-area" id="logArea"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span class="footer-text">VeloTrack v1.1 — CV Speed Tracker</span>
+    <span class="footer-text" id="footerFps">—</span>
+  </footer>
+</div>
+
+<script>
+/* ================================================================
+   VeloTrack v1.1 — Bugs fixed:
+   [1] Camera: tries back-cam (mobile), falls back to front-cam,
+       then bare {video:true} — always triggers permission prompt
+   [2] Camera errors show specific actionable messages per error type
+   [3] HTTPS detection with user-visible warning
+   [4] Canvas bboxes mirrored via ctx.scale(-1,1) to match CSS-mirrored video
+   [5] video-container uses padding-top:56.25% (iOS 14 safe, no aspect-ratio)
+   [6] localBgSamples + localBgFrame reset on every startTracking()
+   [7] canvas.width/height synced on resize + orientationchange
+   [8] Input font-size 16px — prevents iOS auto-zoom
+   [9] Controls use CSS grid — no wrapping chaos on mobile
+   [10] Backend polling capped at 3 attempts — no log spam
+   [11] dt>0.5s guard prevents stale-frame speed spikes
+================================================================ */
+
+const STATE = {
+  cameraActive:false, tracking:false, unit:'kmh',
+  backendUrl:'http://localhost:5000', backendAvailable:false,
+  backendFails:0,
+  frameCount:0, maxSpeed:0, speedHistory:[],
+  speedSum:0, speedSamples:0,
+  lastFpsTime:0, fpsCounter:0, currentFps:0,
+  localPrevCenter:null, localPrevTime:null,
+  localSpeedMs:0, localSpeedKmh:0, pathPoints:[],
+  isFrontCamera:true,
+};
+
+// BG model — module-level so they survive across renders but are reset on startTracking
+let bgSamples=[], bgFrame=null;
+
+const video  = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d', {willReadFrequently:true});
+let graphCtx = null; // set after DOMContentLoaded
+
+// ── LOG ────────────────────────────────────────────────────────
+function log(msg, type='info') {
+  const area = document.getElementById('logArea');
+  const ts   = new Date().toLocaleTimeString('en-US',{hour12:false});
+  const d    = document.createElement('div');
+  d.className = `log-entry ${type}`;
+  d.textContent = `[${ts}] ${msg}`;
+  area.appendChild(d);
+  area.scrollTop = area.scrollHeight;
+  if (area.children.length > 80) area.removeChild(area.firstChild);
+}
+
+// ── HTTPS ──────────────────────────────────────────────────────
+function checkHttps() {
+  const ok = location.protocol==='https:' || ['localhost','127.0.0.1'].includes(location.hostname);
+  if (!ok) {
+    document.getElementById('httpsWarning').classList.add('show');
+    log('HTTPS required for camera on mobile', 'warn');
+  }
+}
+
+// ── BACKEND ────────────────────────────────────────────────────
+async function checkBackend() {
+  if (STATE.backendFails >= 3) return; // stop spamming
+  try {
+    const r = await fetch(`${STATE.backendUrl}/health`, {signal:AbortSignal.timeout(2000)});
+    if (r.ok) {
+      STATE.backendAvailable = true; STATE.backendFails = 0;
+      setEl('backendStatus','Connected','green'); return true;
+    }
+  } catch(_) {}
+  STATE.backendAvailable = false; STATE.backendFails++;
+  setEl('backendStatus','Browser-only','warn');
+  if (STATE.backendFails === 1) log('Backend not found — browser-only CV', 'warn');
+  return false;
+}
+
+// ── CAMERA ─────────────────────────────────────────────────────
+async function startCamera() {
+  hideCamErr();
+  document.getElementById('btnCamera').disabled = true;
+  document.getElementById('placeholderText').innerHTML = 'Requesting<br>camera access…';
+  log('Requesting camera access…', 'info');
+
+  /* FIX: waterfall of constraints
+     1. Back camera ideal (mobile) — may fail on desktop
+     2. Any camera with resolution hint — works on desktop, falls back on mobile
+     3. Bare {video:true} — absolute fallback, always triggers permission dialog */
+  const tries = [
+    {video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false},
+    {video:{width:{ideal:1280},height:{ideal:720}},audio:false},
+    {video:true, audio:false},
+  ];
+
+  let stream=null, lastErr=null;
+  for (const c of tries) {
+    try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+    catch(e) {
+      lastErr = e;
+      // Permission denied — don't bother retrying with softer constraints
+      if (e.name==='NotAllowedError'||e.name==='PermissionDeniedError') break;
+    }
+  }
+
+  if (!stream) { handleCamErr(lastErr); return; }
+
+  // Detect front vs back (affects mirror direction)
+  const track    = stream.getVideoTracks()[0];
+  const settings = track.getSettings ? track.getSettings() : {};
+  STATE.isFrontCamera = settings.facingMode !== 'environment';
+
+  video.srcObject = stream;
+  video.onloadedmetadata = () => {
+    syncCanvas();
+    video.style.display  = 'block';
+    canvas.style.display = 'block';
+    document.getElementById('placeholder').style.display = 'none';
+    log(`Video: ${video.videoWidth}×${video.videoHeight}`, 'info');
+  };
+
+  try { await video.play(); } catch(e) { log('video.play() error: '+e.message,'error'); }
+
+  STATE.cameraActive = true;
+  const label = track.label || 'Camera';
+  setEl('cameraMode', label.length>22 ? label.slice(0,20)+'…' : label, 'accent');
+  setStatus('Camera On','camera');
+  document.getElementById('btnCamera').textContent = '✓ Active';
+  document.getElementById('btnCamera').disabled = true;
+  document.getElementById('btnTrack').disabled  = false;
+  document.getElementById('btnCal').disabled    = false;
+  document.getElementById('fpsBadge').classList.add('visible');
+  document.getElementById('videoContainer').classList.add('scanning');
+  log(`Camera ready: ${label}`, 'success');
+}
+
+function handleCamErr(e) {
+  const name = e?.name ?? 'Unknown';
+  let msg = '';
+  if (name==='NotAllowedError'||name==='PermissionDeniedError') {
+    msg = '🚫 Camera permission denied.\n\nMobile: Settings → Browser → Camera → Allow\nDesktop: click 🔒 in address bar → Camera → Allow → refresh';
+    log('Permission denied', 'error');
+  } else if (name==='NotFoundError'||name==='DevicesNotFoundError') {
+    msg = '📷 No camera found on this device.';
+    log('No camera found', 'error');
+  } else if (name==='NotReadableError'||name==='TrackStartError') {
+    msg = '⚠ Camera is already in use by another app.\nClose that app and try again.';
+    log('Camera in use elsewhere', 'error');
+  } else {
+    msg = `Camera error: ${e?.message ?? name}\nTry refreshing the page.`;
+    log('Camera error: '+(e?.message??name), 'error');
+  }
+  showCamErr(msg);
+  setStatus('Error','error');
+  document.getElementById('btnCamera').disabled = false;
+  document.getElementById('btnCamera').innerHTML = '↺ Retry';
+  document.getElementById('placeholderText').textContent = 'Camera unavailable';
+}
+
+function showCamErr(msg){ const el=document.getElementById('camError'); el.textContent=msg; el.classList.add('show'); }
+function hideCamErr(){ document.getElementById('camError').classList.remove('show'); }
+
+// FIX: keep canvas logical size == video resolution
+function syncCanvas() {
+  if (!video.videoWidth) return;
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+}
+window.addEventListener('resize', ()=>{ if(STATE.cameraActive) syncCanvas(); });
+window.addEventListener('orientationchange', ()=>{ setTimeout(()=>{ if(STATE.cameraActive) syncCanvas(); }, 350); });
+
+// ── TRACKING ───────────────────────────────────────────────────
+async function startTracking() {
+  const cal = parseFloat(document.getElementById('calInput').value) || 100;
+
+  // FIX: full reset every session
+  STATE.frameCount=0; STATE.maxSpeed=0; STATE.speedHistory=[];
+  STATE.speedSum=0; STATE.speedSamples=0; STATE.pathPoints=[];
+  STATE.localPrevCenter=null; STATE.localPrevTime=null;
+  STATE.localSpeedMs=0; STATE.localSpeedKmh=0;
+  // FIX: reset background model
+  bgSamples=[]; bgFrame=null;
+
+  if (STATE.backendAvailable) {
+    try {
+      await fetch(`${STATE.backendUrl}/start-tracking`,{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({calibration_pixels_per_meter:cal})
+      });
+    } catch(_){ STATE.backendAvailable=false; }
+  }
+
+  STATE.tracking = true;
+  setStatus('Tracking','active');
+  document.getElementById('speedOverlay').classList.add('visible');
+  document.getElementById('btnTrack').disabled = true;
+  document.getElementById('btnStop').disabled  = false;
+  document.getElementById('btnCal').disabled   = true;
+  document.getElementById('maxSpeed').textContent = '—';
+  document.getElementById('avgSpeed').textContent = '—';
+  log(`Tracking started — ${cal}px/m — ${STATE.backendAvailable?'backend':'browser'} mode`, 'success');
+  requestAnimationFrame(trackLoop);
+}
+
+async function stopTracking() {
+  STATE.tracking = false;
+  if (STATE.backendAvailable) {
+    try{ await fetch(`${STATE.backendUrl}/stop-tracking`,{method:'POST'}); }catch(_){}
+  }
+  setStatus('Camera On','camera');
+  document.getElementById('speedOverlay').classList.remove('visible');
+  document.getElementById('btnTrack').disabled = false;
+  document.getElementById('btnStop').disabled  = true;
+  document.getElementById('btnCal').disabled   = false;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  log('Tracking stopped','warn');
+}
+
+// ── TRACK LOOP ─────────────────────────────────────────────────
+let offscreen=null, offCtx=null;
+
+async function trackLoop() {
+  if (!STATE.tracking) return;
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if (!vw||!vh){ requestAnimationFrame(trackLoop); return; }
+
+  if (!offscreen||offscreen.width!==vw||offscreen.height!==vh) {
+    offscreen=document.createElement('canvas');
+    offCtx=offscreen.getContext('2d',{willReadFrequently:true});
+    offscreen.width=vw; offscreen.height=vh;
+  }
+
+  // Draw RAW (un-mirrored) frame for CV analysis
+  offCtx.drawImage(video,0,0,vw,vh);
+  STATE.frameCount++;
+  updateFps();
+
+  let result=null;
+  if (STATE.backendAvailable) {
+    try {
+      const b64 = offscreen.toDataURL('image/jpeg',0.5);
+      const r   = await fetch(`${STATE.backendUrl}/process-frame`,{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({frame:b64})
+      });
+      if (r.ok) result = await r.json();
+    } catch(_){ STATE.backendAvailable=false; log('Backend lost → browser CV','warn'); }
+  }
+
+  if (!result) result = localCV(offCtx,vw,vh);
+
+  if (result) {
+    renderOverlay(ctx,result,vw,vh);
+    updateSpeed(result.speed_ms||0, result.speed_kmh||0, !!result.bbox);
+    const det=!!result.bbox;
+    document.getElementById('objDetected').textContent = det?'Yes':'No';
+    document.getElementById('objDetected').className   = `stat-val ${det?'green':'red'}`;
+  }
+  document.getElementById('frameCount').textContent = STATE.frameCount.toLocaleString();
+  requestAnimationFrame(trackLoop);
+}
+
+// ── LOCAL CV ────────────────────────────────────────────────────
+function localCV(oCtx,w,h) {
+  const d    = oCtx.getImageData(0,0,w,h).data;
+  const gray = new Float32Array(w*h);
+  for (let i=0;i<w*h;i++) gray[i]=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2];
+
+  if (bgSamples.length < 8) {
+    bgSamples.push(gray.slice());
+    if (bgSamples.length===8) {
+      bgFrame = new Float32Array(w*h);
+      for (let i=0;i<w*h;i++){let s=0;bgSamples.forEach(f=>s+=f[i]);bgFrame[i]=s/8;}
+      log('Background ready — move an object in frame','success');
+    }
+    return {speed_ms:0,speed_kmh:0,bbox:null,path_points:[]};
+  }
+
+  // Adaptive background
+  for (let i=0;i<w*h;i++) bgFrame[i]=0.97*bgFrame[i]+0.03*gray[i];
+
+  const THRESH=26;
+  const mask=new Uint8Array(w*h);
+  for (let i=0;i<w*h;i++) if(Math.abs(gray[i]-bgFrame[i])>THRESH) mask[i]=255;
+
+  // Dilation
+  const dil=new Uint8Array(w*h), R=6;
+  for (let y=R;y<h-R;y++) {
+    for (let x=R;x<w-R;x++) {
+      O: for (let dy=-R;dy<=R;dy++) for (let dx=-R;dx<=R;dx++) { if(mask[(y+dy)*w+(x+dx)]){dil[y*w+x]=255;break O;} }
+    }
+  }
+
+  let minX=w,minY=h,maxX=0,maxY=0,cnt=0;
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++) if(dil[y*w+x]){if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;cnt++;}
+
+  const MIN=Math.round(w*h*0.0018);
+  if (cnt<MIN||maxX<=minX||maxY<=minY) {
+    STATE.localPrevCenter=null;
+    return {speed_ms:0,speed_kmh:0,bbox:null,path_points:STATE.pathPoints};
+  }
+
+  const bw=maxX-minX, bh=maxY-minY;
+  const cx=Math.round(minX+bw/2), cy=Math.round(minY+bh/2);
+  const now=performance.now()/1000;
+  const cal=parseFloat(document.getElementById('calInput').value)||100;
+
+  let sms=STATE.localSpeedMs, skmh=STATE.localSpeedKmh;
+  if (STATE.localPrevCenter && STATE.localPrevTime) {
+    const dt=now-STATE.localPrevTime;
+    if (dt>0.001 && dt<0.5) { // FIX: ignore stale frames (dt>0.5s)
+      const dx=cx-STATE.localPrevCenter[0], dy=cy-STATE.localPrevCenter[1];
+      const raw=(Math.sqrt(dx*dx+dy*dy)/cal)/dt;
+      sms  = 0.4*raw      + 0.6*STATE.localSpeedMs;
+      skmh = 0.4*raw*3.6  + 0.6*STATE.localSpeedKmh;
+    }
+  }
+  STATE.localSpeedMs=sms; STATE.localSpeedKmh=skmh;
+  STATE.localPrevCenter=[cx,cy]; STATE.localPrevTime=now;
+  STATE.pathPoints.push([cx,cy]);
+  if(STATE.pathPoints.length>60) STATE.pathPoints.shift();
+
+  return {
+    speed_ms:Math.round(sms*1000)/1000, speed_kmh:Math.round(skmh*1000)/1000,
+    bbox:[minX,minY,bw,bh], center:[cx,cy], path_points:STATE.pathPoints.slice()
+  };
+}
+
+// ── RENDER ─────────────────────────────────────────────────────
+function renderOverlay(ctx,result,vw,vh) {
+  if (canvas.width!==vw||canvas.height!==vh){ canvas.width=vw; canvas.height=vh; }
+  ctx.clearRect(0,0,vw,vh);
+
+  /* FIX: video is CSS scaleX(-1). Canvas is NOT. So we apply the
+     same mirror transform in canvas context so bboxes land correctly. */
+  ctx.save();
+  ctx.transform(-1,0,0,1,vw,0); // mirror horizontally
+
+  const pts=result.path_points;
+  if (pts&&pts.length>1) {
+    ctx.strokeStyle='rgba(0,229,255,.55)'; ctx.lineWidth=2;
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.beginPath();
+    pts.forEach(([px,py],i)=>i===0?ctx.moveTo(px,py):ctx.lineTo(px,py));
+    ctx.stroke();
+    pts.forEach(([px,py],i)=>{
+      ctx.fillStyle=`rgba(0,229,255,${(i/pts.length)*.75})`;
+      ctx.beginPath(); ctx.arc(px,py,2.5,0,Math.PI*2); ctx.fill();
+    });
+  }
+
+  if (result.bbox) {
+    const [x,y,bw,bh]=result.bbox;
+    ctx.save(); ctx.shadowColor='#00e5ff'; ctx.shadowBlur=14;
+    ctx.strokeStyle='#00e5ff'; ctx.lineWidth=2;
+    ctx.strokeRect(x,y,bw,bh); ctx.restore();
+
+    const cs=14;
+    ctx.strokeStyle='#00ff94'; ctx.lineWidth=3; ctx.lineCap='square';
+    [[x,y,cs,0,0,cs],[x+bw,y,-cs,0,0,cs],[x,y+bh,cs,0,0,-cs],[x+bw,y+bh,-cs,0,0,-cs]]
+      .forEach(([ox,oy,d1x,d1y,d2x,d2y])=>{
+        ctx.beginPath(); ctx.moveTo(ox+d1x,oy+d1y); ctx.lineTo(ox,oy); ctx.lineTo(ox+d2x,oy+d2y); ctx.stroke();
+      });
+
+    const spd=dispSpeed(result.speed_ms,result.speed_kmh);
+    const lbl=`${spd.val} ${spd.unit}`;
+    ctx.font='bold 13px "DM Mono",monospace';
+    const tw=ctx.measureText(lbl).width;
+    const lx=x+bw/2-tw/2-6, ly=Math.max(y-8,18);
+    ctx.fillStyle='rgba(0,229,255,.9)'; ctx.fillRect(lx,ly-16,tw+12,20);
+    ctx.fillStyle='#080a0f'; ctx.fillText(lbl,lx+6,ly);
+
+    if (result.center) {
+      const [cx2,cy2]=result.center;
+      ctx.strokeStyle='rgba(255,61,113,.9)'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(cx2-10,cy2); ctx.lineTo(cx2+10,cy2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx2,cy2-10); ctx.lineTo(cx2,cy2+10); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// ── SPEED UI ───────────────────────────────────────────────────
+function updateSpeed(ms,kmh,det) {
+  const s=dispSpeed(ms,kmh);
+  document.getElementById('speedKmh').textContent   = kmh.toFixed(1);
+  document.getElementById('speedMs').textContent    = ms.toFixed(2);
+  document.getElementById('overlaySpeed').textContent = s.val;
+  document.getElementById('overlayUnit').textContent  = s.unit;
+
+  const cls=kmh>30?'high':kmh>10?'med':'low';
+  document.getElementById('speedKmh').className=`speed-card-value ${cls}`;
+  document.getElementById('speedMs').className =`speed-card-value ${cls}`;
+  document.getElementById('cardKmh').classList.toggle('active',det);
+  document.getElementById('cardMs').classList.toggle('active',det);
+
+  if (kmh>STATE.maxSpeed){ STATE.maxSpeed=kmh; document.getElementById('maxSpeed').textContent=`${kmh.toFixed(1)} km/h`; }
+  if (kmh>0.1){ STATE.speedSum+=kmh; STATE.speedSamples++; document.getElementById('avgSpeed').textContent=`${(STATE.speedSum/STATE.speedSamples).toFixed(1)} km/h`; }
+
+  STATE.speedHistory.push(kmh);
+  if (STATE.speedHistory.length>90) STATE.speedHistory.shift();
+  drawGraph();
+}
+
+function drawGraph() {
+  if (!graphCtx) return;
+  const el=document.getElementById('speedGraph');
+  const gw=el.offsetWidth||260, gh=70;
+  el.width=gw; el.height=gh;
+  const g=graphCtx;
+  g.clearRect(0,0,gw,gh); g.fillStyle='#111820'; g.fillRect(0,0,gw,gh);
+  const pts=STATE.speedHistory;
+  if (pts.length<2) return;
+  const mx=Math.max(...pts,1);
+  g.strokeStyle='rgba(30,42,58,.8)'; g.lineWidth=1;
+  g.beginPath(); g.moveTo(0,gh/2); g.lineTo(gw,gh/2); g.stroke();
+  const gr=g.createLinearGradient(0,0,0,gh);
+  gr.addColorStop(0,'rgba(0,229,255,.28)'); gr.addColorStop(1,'rgba(0,229,255,0)');
+  g.beginPath();
+  pts.forEach((v,i)=>{ const x=(i/(pts.length-1))*gw, y=gh-(v/mx)*(gh-5)-3; i===0?g.moveTo(x,y):g.lineTo(x,y); });
+  g.lineTo(gw,gh); g.lineTo(0,gh); g.closePath(); g.fillStyle=gr; g.fill();
+  g.beginPath();
+  pts.forEach((v,i)=>{ const x=(i/(pts.length-1))*gw, y=gh-(v/mx)*(gh-5)-3; i===0?g.moveTo(x,y):g.lineTo(x,y); });
+  g.strokeStyle='#00e5ff'; g.lineWidth=1.5; g.stroke();
+}
+
+// ── HELPERS ─────────────────────────────────────────────────────
+function dispSpeed(ms,kmh) {
+  if (STATE.unit==='ms')  return {val:ms.toFixed(2),  unit:'m/s'};
+  if (STATE.unit==='mph') return {val:(kmh*.621371).toFixed(1), unit:'mph'};
+  return {val:kmh.toFixed(1), unit:'km/h'};
+}
+function setUnit(u) {
+  STATE.unit=u;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById({kmh:'unitKmh',ms:'unitMs',mph:'unitMph'}[u]).classList.add('active');
+}
+function setStatus(t,type) {
+  document.getElementById('statusText').textContent=t;
+  document.getElementById('statusDot').className='status-dot'+(type?' '+type:'');
+}
+function setEl(id,txt,cls) {
+  const el=document.getElementById(id); if(!el) return;
+  el.textContent=txt; if(cls) el.className=`stat-val ${cls}`;
+}
+function updateFps() {
+  STATE.fpsCounter++;
+  const now=performance.now();
+  if (now-STATE.lastFpsTime>=1000) {
+    STATE.currentFps=STATE.fpsCounter; STATE.fpsCounter=0; STATE.lastFpsTime=now;
+    document.getElementById('fpsBadge').textContent=`${STATE.currentFps} FPS`;
+    document.getElementById('footerFps').textContent=`${STATE.currentFps} FPS`;
+  }
+}
+function runCalibration() {
+  const cur=document.getElementById('calInput').value;
+  const v=prompt(`Calibration — pixels per meter\n\n1. Place a 1 m object in frame\n2. Count its pixel width\n3. Enter below\n\nCurrent: ${cur} px/m`, cur);
+  if (v!==null){ const n=parseFloat(v); if(n>0){ document.getElementById('calInput').value=n; log(`Calibration: ${n} px/m`,'success'); } }
+}
+
+// ── INIT ───────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  graphCtx = document.getElementById('speedGraph').getContext('2d');
+  checkHttps();
+  checkBackend();
+  log('VeloTrack v1.1 ready','info');
+  log('Press "Camera" to begin','info');
+});
+</script>
+</body>
+</html>
